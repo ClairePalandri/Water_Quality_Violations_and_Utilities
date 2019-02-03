@@ -1,0 +1,73 @@
+---
+title: "Exploratory Analysis of the data"
+author: "Yash Amonkar"
+date: "February 3, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+library(dplyr)
+```
+
+###Data Input
+
+The variables selected are the FIPS code, the per capita medicine and bottles sales, week end along with indicators for violations in the first and second week. 
+
+```{r}
+input_data <- read.csv("cnty_wk_V2_FULLPANEL.csv")
+cleaned_data <- input_data %>% 
+        select(county_FIPS, week_end, dum_1stwk_viol, dum_2ndwk_viol, defl_medsales_pc, defl_bottlesales_pc)
+head(cleaned_data)
+
+```
+
+##Creating the Dataset for violation for first and second weeks
+
+The Na values are converted to zero.
+
+```{r}
+cleaned_data$dum_1stwk_viol[is.na(cleaned_data$dum_1stwk_viol)] <- 0  
+cleaned_data$dum_2ndwk_viol[is.na(cleaned_data$dum_2ndwk_viol)] <- 0
+cleaned_data$dum_2ndwk_viol <- cleaned_data$dum_1stwk_viol + cleaned_data$dum_2ndwk_viol
+colSums(is.na(cleaned_data)) #Check for NA Values
+head(cleaned_data)
+```
+
+## Selecting counties with complete Med Sales Data
+
+We have medicine sales data for select counties. We now select and include the counties for which we have medicine sales data. Note:- The counties which have medicine sales data also have data for sales of bottled water.
+
+```{r, warning=FALSE}
+total_med_sales_per_county <- cleaned_data %>% 
+                  group_by(county_FIPS) %>%
+                  summarise(meds = sum(defl_medsales_pc))
+
+total_med_sales_per_county <- total_med_sales_per_county %>% 
+                  filter(meds > 0)
+head(total_med_sales_per_county)
+```
+
+The file above contains the sum of total medicine sales. Values which correspond to zero, are counties which do not have medicine sales were removed. 
+
+##Merging
+
+```{r}
+Merged_dataset <- merge(cleaned_data,total_med_sales_per_county, by = "county_FIPS")
+Merged_dataset$meds <- NULL #This is the total med sales for 10 years and is not needed. 
+colSums(is.na(Merged_dataset)) # Check for NA values
+head(Merged_dataset)
+```
+
+##Saving the Dataset
+
+The dataset which is cleaned can be used directly in the Stan-Regression models. We save the output in a text format. 
+
+```{r}
+write.table(Merged_dataset, "Dataset for Regression.txt", sep = " ")
+```
+
