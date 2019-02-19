@@ -1,55 +1,91 @@
-####################Intialization##############
+---
+title: "Partially Pooled Model"
+author: "Yash Amonkar"
+date: "February 3, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Loading Required Libraries and Pre-requisites
+```{r, message=FALSE, warning=FALSE}
 library(rstan)
 library(dplyr)
 options(mc.cores = parallel::detectCores()) #Local Multicore CPU excess 
 print("Library Loading Complete")
+```
 
-
-
-##################Data_Input##########################
+##Data Input
+Reading the cleaned data
+```{r}
 input_data <- read.table("Dataset for Regression.txt", sep =" ", header = TRUE)
 print("Data Input successful. We now run the stan program")
+```
 
+##Subsetting_Dataset_to_state_level
 
+This file is for running a partailly pooled model for each state. 
+Texas is 48
+oklahoma is 40
 
-
-########Subsetting_Dataset_to_state_level######################
-#Enter State FIPS Code
-state_FIPS_code <- 40
-input_data <- input_data %>%
+```{r}
+state_FIPS_code <- 48
+state_data <- input_data %>%
               filter(county_FIPS > state_FIPS_code*1000 & county_FIPS < (state_FIPS_code+1)*1000 ) 
 
-input_data <- transform(input_data, id=match(county_FIPS, unique(county_FIPS)))
+state_data <- state_data %>% group_by(county_FIPS) %>% mutate(defl_medsales_pc = scale(defl_medsales_pc), defl_bottlesales_pc = scale(defl_bottlesales_pc))
+
+state_data <- transform(state_data, id=match(county_FIPS, unique(county_FIPS)))
+head(state_data)
+state_data <- subset(state_data, county_FIPS < 48006) #This line is to be included in the demonstration only. REMOVE WHEN RUNNING ACTUAL PROGRAM
 print("Data Subsetting successful. We now run the stan program")
+```
+
+##Stan Code
+```{r}
+writeLines(readLines("Partial_Pooling_Multiparameter.stan"))
+```
 
 
 
-#############Stan_Parameters###################
-N <- dim(input_data)[1]
-J <- max(input_data$id)
-groups <- input_data$id
-chains <- 6 
-iter <- 2000
-warmup <- 1000
-X <- as.matrix(data.frame(1, input_data$defl_medsales_pc,input_data$defl_bottlesales_pc))
+
+
+##Stan Parameters
+```{r}
+N <- dim(state_data)[1]
+J <- max(state_data$id)
+groups <- state_data$id
+chains <- 3 
+iter <- 1000
+warmup <- 500
+X <- as.matrix(data.frame(1, state_data$defl_medsales_pc,state_data$defl_bottlesales_pc))
 K <- dim(X)[2]
-data_list <- list(N=N, K = K, J=J, X = X, z=input_data$dum_2ndwk_viol, id = groups)
+data_list <- list(N=N, K = K, J=J, X = X, z=state_data$dum_2ndwk_viol, id = groups)
+```
 
-#############3Running_the_Stan_Model#################
+##Running_the_Stan_Model
+```{r}
 model_stan <- stan(file = "Partial_Pooling_Multiparameter.stan", data=data_list, chains = chains, iter = iter, warmup = warmup,control = list(adapt_delta = 0.95))
 print("Stan Program has run and is completed")
 print(model_stan, pars = c("nu", "nu_group"))
+```
 
+##Saving the Model Ouput and Simulation Draws
+```{r}
 data_summary <- summary(model_stan)$summary #Here we analyze check the global parameters. 
 data_draws <- as.data.frame(extract(model_stan))
 print("Saving data complete")
 
 write.table(data_summary, "Stan Model Summary - Pooled.txt", sep = " ")
 write.table(data_draws, "Draws - Pooled.txt", sep = " ")
+```
 
+The simulation draws are saved for computation of different quantities if needed. 
 
-
-######################Plotting_the_uncertainty############
+##Plotting the results and uncertainity
+```{r}
 Reporting_Rate <- as.data.frame(summary(model_stan, pars = c("nu", "nu_group")))
 Reporting_Rate$index <- 1:dim(Reporting_Rate)[1]
 J <- dim(Reporting_Rate)[1]
@@ -61,7 +97,7 @@ Coefficient_Estimates <- as.data.frame(summary(model_stan, pars = c("beta", "bet
 Coefficient_Medicine <- Coefficient_Bottles <- Intercept <- as.data.frame(matrix(0,ncol=ncol(Coefficient_Estimates), nrow=nrow(Coefficient_Estimates)/3))
 colnames(Coefficient_Medicine) <- colnames(Coefficient_Bottles) <- colnames(Intercept) <- colnames(Coefficient_Estimates)
 
-for(i in 1:(max(input_data$id)+1)){
+for(i in 1:(max(state_data$id)+1)){
   index <- 3*(i-1) + 1
   Intercept[i,] <- Coefficient_Estimates[index,]
   Coefficient_Medicine[i,] <- Coefficient_Estimates[index+1,]
@@ -115,3 +151,5 @@ for (j in 2:J){
 }
 
 dev.off()
+```
+
